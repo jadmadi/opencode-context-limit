@@ -10,6 +10,20 @@ commits:
 
 ## Report
 
+**T0 spike result** - The mechanism is a catalog transform:
+
+```ts
+ctx.catalog.transform((catalog) =>
+  catalog.model.update(providerID, modelID, (model) => {
+    model.limit = { ...model.limit, context: n }
+  }),
+)
+```
+
+A probe lowered `deepseek/deepseek-flash` from 1,000,000 to 123,456, and a
+re-read showed 123,456. Compaction's default threshold follows the model's
+usable input budget, so this is the mechanism, and no config edit is needed.
+
 ## [S1] Problem
 
 Model catalog windows are optimistic. A provider can serve less than the catalog

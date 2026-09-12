@@ -117,7 +117,11 @@ const plugin = {
             const key = model ? `${model.providerID}/${model.id}` : undefined
             const context = key ? await modelContext(ctx, key) : undefined
             const rule = key ? longestMatch(rules, key) : undefined
-            const budget = rule ? (rule.unit === "percent" ? `${rule.value}%` : String(rule.value)) : "none"
+            const budget = rule
+              ? rule.unit === "percent"
+                ? `${rule.value}%`
+                : String(Math.min(rule.value, context ?? rule.value))
+              : "none"
             throw new Error(
               [
                 key ? `Model: ${key}` : "Model: unknown",

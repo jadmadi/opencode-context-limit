@@ -185,6 +185,14 @@ describe("command", () => {
     await expect(run(commands, "")).rejects.toThrow(/Budget: 50%/)
   })
 
+  test("clamps a token rule in the display", async () => {
+    const { ctx, commands } = makeCtx()
+    await (plugin as any).setup(ctx)
+    await run(commands, "2M")
+    await expect(run(commands, "")).rejects.toThrow(/Effective window: 1000000/)
+    await expect(run(commands, "")).rejects.toThrow(/Budget: 1000000/)
+  })
+
   test("rejects a bad value", async () => {
     const { ctx, commands } = makeCtx()
     await (plugin as any).setup(ctx)
