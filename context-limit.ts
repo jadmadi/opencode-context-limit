@@ -116,12 +116,13 @@ const plugin = {
             const model = info?.model ?? info?.data?.model
             const key = model ? `${model.providerID}/${model.id}` : undefined
             const context = key ? await modelContext(ctx, key) : undefined
-            const budget = key && context ? resolveBudget(rules, key, context) : undefined
+            const rule = key ? longestMatch(rules, key) : undefined
+            const budget = rule ? (rule.unit === "percent" ? `${rule.value}%` : String(rule.value)) : "none"
             throw new Error(
               [
                 key ? `Model: ${key}` : "Model: unknown",
                 `Effective window: ${context ?? "unknown"}`,
-                `Budget: ${budget ?? "none"}`,
+                `Budget: ${budget}`,
                 "",
                 describeRules(rules),
               ].join("\n"),
@@ -150,15 +151,17 @@ const plugin = {
             }
           }
 
-          if (valueText === "0") {
+          const parsed = parseBudget(valueText)
+          const clears = valueText === "0" || (parsed?.unit === "tokens" && parsed.value === 0)
+          if (clears) {
             rules = rules.filter((rule) => rule.pattern !== pattern)
             await saveRules(ctx, rules)
             await ctx.catalog.reload()
             return
           }
-
-          const parsed = parseBudget(valueText)
-          if (!parsed) throw new Error(`bad value "${valueText}"; use 128000, 128K, 1M, or 50% (0 clears)`)
+          if (!parsed || (parsed.unit === "tokens" && parsed.value <= 0)) {
+            throw new Error(`bad value "${valueText}"; use 128000, 128K, 1M, or 50% (0 clears)`)
+          }
           rules = rules.filter((rule) => rule.pattern !== pattern)
           rules.push({ pattern, value: parsed.value, unit: parsed.unit })
           await saveRules(ctx, rules)

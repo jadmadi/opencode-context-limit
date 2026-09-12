@@ -30,6 +30,34 @@ function makeCtx(options: { model?: any; models?: any[] } = {}) {
   const commands: any[] = []
   const transforms: any[] = []
   let reloads = 0
+  const baseModels = (
+    options.models ?? [
+      { providerID: "opencode-go", id: "deepseek-v4.1-flash", limit: { context: 1_000_000, output: 1000 } },
+    ]
+  ).map((model) => structuredClone(model))
+
+  // Rebuild the catalog from the registered transforms on every read, the way
+  // the runtime replays transforms onto a fresh value.
+  const rebuild = () => {
+    const entries = structuredClone(baseModels)
+    const providers = new Map<string, { providerID: string; models: Map<string, any> }>()
+    for (const entry of entries) {
+      if (!providers.has(entry.providerID)) providers.set(entry.providerID, { providerID: entry.providerID, models: new Map() })
+      providers.get(entry.providerID)!.models.set(entry.id, entry)
+    }
+    const editor = {
+      provider: { list: () => [...providers.values()] },
+      model: {
+        update: (providerID: string, modelID: string, change: (model: any) => void) => {
+          const model = providers.get(providerID)?.models.get(modelID)
+          if (model) change(model)
+        },
+      },
+    }
+    for (const transform of transforms) transform(editor)
+    return entries
+  }
+
   const ctx: any = {
     storage: {
       get: async (key: string) => store.get(key),
@@ -41,11 +69,7 @@ function makeCtx(options: { model?: any; models?: any[] } = {}) {
     catalog: {
       transform: async (callback: any) => void transforms.push(callback),
       reload: async () => void (reloads += 1),
-      model: {
-        list: async () => ({
-          data: options.models ?? [{ providerID: "opencode-go", id: "deepseek-v4.1-flash", limit: { context: 1_000_000, output: 1000 } }],
-        }),
-      },
+      model: { list: async () => ({ data: rebuild() }) },
     },
     command: { transform: (callback: any) => callback({ add: (definition: any) => commands.push(definition) }) },
   }
@@ -139,14 +163,26 @@ describe("command", () => {
     expect(store.get("context-limit")).toEqual([{ pattern: "opencode-go/*", value: 50, unit: "percent" }])
     await run(commands, "opencode-go/* 0")
     expect(store.get("context-limit")).toEqual([])
+    await run(commands, "opencode-go/* 50%")
+    await run(commands, "opencode-go/* 0K")
+    expect(store.get("context-limit")).toEqual([])
   })
 
   test("shows the current model and the rules", async () => {
     const { ctx, commands } = makeCtx()
     await (plugin as any).setup(ctx)
     await run(commands, "128K")
-    await expect(run(commands, "")).rejects.toThrow(/Effective window: 1000000/)
+    await expect(run(commands, "")).rejects.toThrow(/Effective window: 128000/)
+    await expect(run(commands, "")).rejects.toThrow(/Budget: 128000/)
     await expect(run(commands, "")).rejects.toThrow(/opencode-go\/deepseek-v4.1-flash/)
+  })
+
+  test("reports a percent rule without applying it twice", async () => {
+    const { ctx, commands } = makeCtx()
+    await (plugin as any).setup(ctx)
+    await run(commands, "50%")
+    await expect(run(commands, "")).rejects.toThrow(/Effective window: 500000/)
+    await expect(run(commands, "")).rejects.toThrow(/Budget: 50%/)
   })
 
   test("rejects a bad value", async () => {
