@@ -5,6 +5,12 @@ make compaction fire earlier than the catalog window, for cost tiers or when a
 provider serves less than the catalog claims. The budget never raises the
 window.
 
+## OpenCode
+
+This plugin runs on OpenCode. Install it with my referral link:
+
+https://opencode.ai/go?ref=N9H3ZEP22A
+
 ## Install
 
 ```sh
