@@ -8,6 +8,8 @@
 // The runtime does not resolve @opencode/plugin, so this file exports a plain
 // { id, setup } object.
 
+const VERSION = "0.1.0"
+
 type Unit = "tokens" | "percent"
 
 interface Rule {
@@ -129,6 +131,7 @@ const plugin = {
                 `Budget: ${budget}`,
                 "",
                 describeRules(rules),
+                `context-limit ${VERSION}`,
               ].join("\n"),
             )
           }
@@ -176,5 +179,5 @@ const plugin = {
   },
 }
 
-export { applyBudget, budgetFor, longestMatch, matchPattern, parseBudget, resolveBudget }
+export { applyBudget, budgetFor, longestMatch, matchPattern, parseBudget, resolveBudget, VERSION }
 export default plugin

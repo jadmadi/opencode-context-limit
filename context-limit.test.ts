@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import plugin, { applyBudget, longestMatch, matchPattern, parseBudget, resolveBudget } from "./context-limit.ts"
+import plugin, { applyBudget, longestMatch, matchPattern, parseBudget, resolveBudget, VERSION } from "./context-limit.ts"
 
 function makeCatalog(models: Array<{ providerID: string; id: string; context: number }>) {
   const entries = models.map((model) => ({
@@ -211,5 +211,12 @@ describe("setup", () => {
     const catalog = makeCatalog([{ providerID: "opencode-go", id: "x", context: 1_000_000 }])
     transforms[0](catalog)
     expect(catalog.entries[0].limit.context).toBe(128_000)
+  })
+})
+
+describe("version", () => {
+  test("VERSION matches package.json", async () => {
+    const pkg = (await Bun.file(new URL("./package.json", import.meta.url)).json()) as { version: string }
+    expect(VERSION).toBe(pkg.version)
   })
 })
