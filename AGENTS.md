@@ -5,8 +5,8 @@ Guidance for agents working in this repository.
 ## What this is
 
 An OpenCode V2 plugin (`context-limit.ts`) that sets a per-model working context
-budget by lowering the model's `limit.context` through a catalog transform. No
-build step, no dependencies, MIT.
+budget and a max output-token budget by lowering the model's `limit.context` /
+`limit.output` through a catalog transform. No build step, no dependencies, MIT.
 
 ## Local development
 
@@ -40,18 +40,20 @@ config edit is needed.
 
 ## API notes
 
-- `ctx.catalog.transform((catalog) => catalog.model.update(providerID, modelID, (model) => { model.limit = { ...model.limit, context: n } }))`
+- `ctx.catalog.transform((catalog) => catalog.model.update(providerID, modelID, (model) => { model.limit = { ...model.limit, [field]: n } }))`
   lowers a window. Call `ctx.catalog.reload()` after changing the rules.
 - Model entries from `ctx.catalog.model.list()` carry `providerID`, `id`, and
-  `limit.context`.
-- Rules live in `ctx.storage` under `context-limit`.
+  `limit.context` / `limit.output`.
+- Rules live in `ctx.storage` under `context-limit` and `output-limit`.
 
 ## Layout
 
 - `parseBudget` - parses tokens, `128K`, `1M`, and `50%`, with clamping.
 - `matchPattern`, `longestMatch`, `resolveBudget` - rule matching.
-- `applyBudget` - the catalog transform body, exported for tests.
-- `setup` - registers the command and the transform.
+- `applyBudget` - the catalog transform body (`kind` selects `context` vs
+  `output`), exported for tests.
+- `makeCommand` - builds `/context-limit` and `/output-limit` from one template.
+- `setup` - registers both commands and the transform.
 - `context-limit.test.ts` - tests with a fake catalog and ctx.
 
 ## Releasing
