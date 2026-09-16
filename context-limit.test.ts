@@ -145,6 +145,27 @@ describe("applyBudget", () => {
   })
 })
 
+describe("applyBudget output", () => {
+  test("lowers only the output limit for matched models", () => {
+    const catalog = makeCatalog([
+      { providerID: "opencode-go", id: "x", context: 1_000_000 },
+      { providerID: "deepseek", id: "y", context: 1_000_000 },
+    ])
+    applyBudget(catalog, [{ pattern: "opencode-go/*", value: 512, unit: "tokens" }], "output")
+    const byKey = Object.fromEntries(
+      catalog.entries.map((entry: any) => [`${entry.providerID}/${entry.id}`, entry.limit.output]),
+    )
+    expect(byKey["opencode-go/x"]).toBe(512)
+    expect(byKey["deepseek/y"]).toBe(1000)
+  })
+
+  test("clamps an output rule to the catalog output ceiling", () => {
+    const catalog = makeCatalog([{ providerID: "a", id: "b", context: 1_000_000 }])
+    applyBudget(catalog, [{ pattern: "*", value: 999_999, unit: "tokens" }], "output")
+    expect(catalog.entries[0].limit.output).toBe(1000)
+  })
+})
+
 describe("command", () => {
   const run = (commands: any[], text: string) => commands[0].execute({ sessionID: "ses_1", prompt: { text } })
 
@@ -200,12 +221,43 @@ describe("command", () => {
   })
 })
 
+describe("output-limit command", () => {
+  const run = (commands: any[], text: string) => {
+    const command = commands.find((entry: any) => entry.name === "output-limit")
+    return command.execute({ sessionID: "ses_1", prompt: { text } })
+  }
+
+  test("sets an output budget for the current model", async () => {
+    const { ctx, store, commands, reloads } = makeCtx()
+    await (plugin as any).setup(ctx)
+    await run(commands, "16K")
+    expect(store.get("output-limit")).toEqual([
+      { pattern: "opencode-go/deepseek-v4.1-flash", value: 16_000, unit: "tokens" },
+    ])
+    expect(reloads()).toBe(1)
+  })
+
+  test("keeps output rules separate from context rules", async () => {
+    const { ctx, store, commands } = makeCtx()
+    await (plugin as any).setup(ctx)
+    await run(commands, "16K")
+    expect(store.get("context-limit")).toBeUndefined()
+  })
+
+  test("shows the current model and effective output", async () => {
+    const { ctx, commands } = makeCtx()
+    await (plugin as any).setup(ctx)
+    await run(commands, "512")
+    await expect(run(commands, "")).rejects.toThrow(/Effective output: 512/)
+  })
+})
+
 describe("setup", () => {
   test("registers the command and a transform that uses stored rules", async () => {
     const { ctx, store, commands, transforms } = makeCtx()
     await store.set("context-limit", [{ pattern: "opencode-go/*", value: 128_000, unit: "tokens" }])
     await (plugin as any).setup(ctx)
-    expect(commands.map((entry) => entry.name)).toEqual(["context-limit"])
+    expect(commands.map((entry) => entry.name)).toEqual(["context-limit", "output-limit"])
     expect(transforms).toHaveLength(1)
 
     const catalog = makeCatalog([{ providerID: "opencode-go", id: "x", context: 1_000_000 }])
