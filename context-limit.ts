@@ -1,14 +1,14 @@
 // OpenCode V2 context-limit plugin.
 //
 // Sets a working context budget per model by lowering the model's
-// `limit.context` through a catalog transform. Compaction's default threshold
+// `limit.context` through a model transform. Compaction's default threshold
 // follows the model's usable input budget, so a lower window makes compaction
 // fire earlier. A budget can only lower a window, never raise it.
 //
 // The runtime does not resolve @opencode/plugin, so this file exports a plain
 // { id, setup } object.
 
-const VERSION = "0.1.2"
+const VERSION = "0.1.3"
 
 type Unit = "tokens" | "percent"
 
@@ -60,19 +60,17 @@ function resolveBudget(rules: Rule[], key: string, catalogContext: number): numb
   return rule ? budgetFor(rule, catalogContext) : undefined
 }
 
-// The catalog transform body. `catalog` is a catalog editor: it exposes
-// provider.list() and model.update(providerID, modelID, change).
-function applyBudget(catalog: any, rules: Rule[]): void {
+// The model transform body. `editor` is a model editor: it exposes
+// list() and update(providerID, modelID, change).
+function applyBudget(editor: any, rules: Rule[]): void {
   if (rules.length === 0) return
-  for (const record of catalog.provider.list()) {
-    for (const model of record.models.values()) {
-      const key = `${model.providerID}/${model.id}`
-      const budget = resolveBudget(rules, key, model.limit.context)
-      if (budget === undefined) continue
-      catalog.model.update(model.providerID, model.id, (entry: any) => {
-        entry.limit = { ...entry.limit, context: budget }
-      })
-    }
+  for (const model of editor.list()) {
+    const key = `${model.providerID}/${model.id}`
+    const budget = resolveBudget(rules, key, model.limit.context)
+    if (budget === undefined) continue
+    editor.update(model.providerID, model.id, (entry: any) => {
+      entry.limit = { ...entry.limit, context: budget }
+    })
   }
 }
 
@@ -86,7 +84,7 @@ async function saveRules(ctx: any, rules: Rule[]): Promise<void> {
 }
 
 async function modelContext(ctx: any, key: string): Promise<number | undefined> {
-  const result = await ctx.catalog.model.list()
+  const result = await ctx.model.list()
   const data: any[] = Array.isArray(result) ? result : (result?.data ?? [])
   const found = data.find((model) => `${model.providerID}/${model.id}` === key)
   return found?.limit?.context
@@ -104,7 +102,7 @@ const plugin = {
   async setup(ctx: any) {
     let rules = await loadRules(ctx)
 
-    await ctx.catalog.transform((catalog: any) => applyBudget(catalog, rules))
+    await ctx.model.transform((editor: any) => applyBudget(editor, rules))
 
     await ctx.command.transform((editor: any) => {
       editor.add({
@@ -163,7 +161,7 @@ const plugin = {
           if (clears) {
             rules = rules.filter((rule) => rule.pattern !== pattern)
             await saveRules(ctx, rules)
-            await ctx.catalog.reload()
+            await ctx.model.reload()
             return
           }
           if (!parsed || (parsed.unit === "tokens" && parsed.value <= 0)) {
@@ -172,7 +170,7 @@ const plugin = {
           rules = rules.filter((rule) => rule.pattern !== pattern)
           rules.push({ pattern, value: parsed.value, unit: parsed.unit })
           await saveRules(ctx, rules)
-          await ctx.catalog.reload()
+          await ctx.model.reload()
         },
       })
     })

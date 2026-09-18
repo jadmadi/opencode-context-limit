@@ -43,9 +43,9 @@ matches everything. The longest matching pattern wins.
 
 ## How it works
 
-The plugin registers a catalog transform that lowers the matched models'
+The plugin registers a model transform that lowers the matched models'
 `limit.context`. Compaction's default threshold follows the model's usable input
-budget, so compaction fires earlier. A change calls `ctx.catalog.reload()` and
+budget, so compaction fires earlier. A change calls `ctx.model.reload()` and
 applies at once. Nothing is written to `opencode.json`.
 
 ## Tests

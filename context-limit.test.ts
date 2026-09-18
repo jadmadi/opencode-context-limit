@@ -1,28 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import plugin, { applyBudget, longestMatch, matchPattern, parseBudget, resolveBudget, VERSION } from "./context-limit.ts"
 
-function makeCatalog(models: Array<{ providerID: string; id: string; context: number }>) {
+function makeEditor(models: Array<{ providerID: string; id: string; context: number }>) {
   const entries = models.map((model) => ({
     providerID: model.providerID,
     id: model.id,
     limit: { context: model.context, output: 1000 },
   }))
-  const providers = new Map<string, { providerID: string; models: Map<string, any> }>()
-  for (const entry of entries) {
-    if (!providers.has(entry.providerID)) providers.set(entry.providerID, { providerID: entry.providerID, models: new Map() })
-    providers.get(entry.providerID)!.models.set(entry.id, entry)
-  }
-  const catalog: any = {
-    provider: { list: () => [...providers.values()] },
-    model: {
-      update: (providerID: string, modelID: string, change: (model: any) => void) => {
-        const model = providers.get(providerID)?.models.get(modelID)
-        if (model) change(model)
-      },
+  const editor: any = {
+    list: () => entries,
+    update: (providerID: string, modelID: string, change: (model: any) => void) => {
+      const model = entries.find((entry) => entry.providerID === providerID && entry.id === modelID)
+      if (model) change(model)
     },
     entries,
   }
-  return catalog
+  return editor
 }
 
 function makeCtx(options: { model?: any; models?: any[] } = {}) {
@@ -36,22 +29,15 @@ function makeCtx(options: { model?: any; models?: any[] } = {}) {
     ]
   ).map((model) => structuredClone(model))
 
-  // Rebuild the catalog from the registered transforms on every read, the way
-  // the runtime replays transforms onto a fresh value.
+  // Rebuild the model list from the registered transforms on every read, the
+  // way the runtime replays transforms onto a fresh value.
   const rebuild = () => {
     const entries = structuredClone(baseModels)
-    const providers = new Map<string, { providerID: string; models: Map<string, any> }>()
-    for (const entry of entries) {
-      if (!providers.has(entry.providerID)) providers.set(entry.providerID, { providerID: entry.providerID, models: new Map() })
-      providers.get(entry.providerID)!.models.set(entry.id, entry)
-    }
     const editor = {
-      provider: { list: () => [...providers.values()] },
-      model: {
-        update: (providerID: string, modelID: string, change: (model: any) => void) => {
-          const model = providers.get(providerID)?.models.get(modelID)
-          if (model) change(model)
-        },
+      list: () => entries,
+      update: (providerID: string, modelID: string, change: (model: any) => void) => {
+        const model = entries.find((entry) => entry.providerID === providerID && entry.id === modelID)
+        if (model) change(model)
       },
     }
     for (const transform of transforms) transform(editor)
@@ -66,10 +52,10 @@ function makeCtx(options: { model?: any; models?: any[] } = {}) {
     session: {
       get: async () => ({ model: options.model ?? { providerID: "opencode-go", id: "deepseek-v4.1-flash" } }),
     },
-    catalog: {
+    model: {
       transform: async (callback: any) => void transforms.push(callback),
       reload: async () => void (reloads += 1),
-      model: { list: async () => ({ data: rebuild() }) },
+      list: async () => ({ data: rebuild() }),
     },
     command: { transform: (callback: any) => callback({ add: (definition: any) => commands.push(definition) }) },
   }
@@ -128,20 +114,20 @@ describe("longestMatch and resolveBudget", () => {
 
 describe("applyBudget", () => {
   test("lowers only matched models", () => {
-    const catalog = makeCatalog([
+    const editor = makeEditor([
       { providerID: "opencode-go", id: "x", context: 1_000_000 },
       { providerID: "deepseek", id: "y", context: 1_000_000 },
     ])
-    applyBudget(catalog, [{ pattern: "opencode-go/*", value: 128_000, unit: "tokens" }])
-    const byKey = Object.fromEntries(catalog.entries.map((entry: any) => [`${entry.providerID}/${entry.id}`, entry.limit.context]))
+    applyBudget(editor, [{ pattern: "opencode-go/*", value: 128_000, unit: "tokens" }])
+    const byKey = Object.fromEntries(editor.entries.map((entry: any) => [`${entry.providerID}/${entry.id}`, entry.limit.context]))
     expect(byKey["opencode-go/x"]).toBe(128_000)
     expect(byKey["deepseek/y"]).toBe(1_000_000)
   })
 
   test("does nothing without rules", () => {
-    const catalog = makeCatalog([{ providerID: "a", id: "b", context: 1000 }])
-    applyBudget(catalog, [])
-    expect(catalog.entries[0].limit.context).toBe(1000)
+    const editor = makeEditor([{ providerID: "a", id: "b", context: 1000 }])
+    applyBudget(editor, [])
+    expect(editor.entries[0].limit.context).toBe(1000)
   })
 })
 
@@ -208,9 +194,9 @@ describe("setup", () => {
     expect(commands.map((entry) => entry.name)).toEqual(["context-limit"])
     expect(transforms).toHaveLength(1)
 
-    const catalog = makeCatalog([{ providerID: "opencode-go", id: "x", context: 1_000_000 }])
-    transforms[0](catalog)
-    expect(catalog.entries[0].limit.context).toBe(128_000)
+    const editor = makeEditor([{ providerID: "opencode-go", id: "x", context: 1_000_000 }])
+    transforms[0](editor)
+    expect(editor.entries[0].limit.context).toBe(128_000)
   })
 })
 
