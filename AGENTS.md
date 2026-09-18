@@ -5,7 +5,7 @@ Guidance for agents working in this repository.
 ## What this is
 
 An OpenCode V2 plugin (`context-limit.ts`) that sets a per-model working context
-budget by lowering the model's `limit.context` through a catalog transform. No
+budget by lowering the model's `limit.context` through a model transform. No
 build step, no dependencies, MIT.
 
 ## Local development
@@ -24,9 +24,9 @@ grep context-limit ~/.local/share/opencode/log/opencode.log | tail
 
 ## Spike result (T0)
 
-A catalog transform can lower a model's context window at runtime. A probe set
+A model transform can lower a model's context window at runtime. A probe set
 `deepseek/deepseek-flash` from 1,000,000 to 123,456 through
-`ctx.catalog.transform`, and a re-read showed 123,456. Compaction's default
+`ctx.model.transform`, and a re-read showed 123,456. Compaction's default
 threshold follows the model's usable input budget, so this is the mechanism. No
 config edit is needed.
 
@@ -40,9 +40,9 @@ config edit is needed.
 
 ## API notes
 
-- `ctx.catalog.transform((catalog) => catalog.model.update(providerID, modelID, (model) => { model.limit = { ...model.limit, context: n } }))`
-  lowers a window. Call `ctx.catalog.reload()` after changing the rules.
-- Model entries from `ctx.catalog.model.list()` carry `providerID`, `id`, and
+- `ctx.model.transform((editor) => editor.update(providerID, modelID, (model) => { model.limit = { ...model.limit, context: n } }))`
+  lowers a window. Call `ctx.model.reload()` after changing the rules.
+- Model entries from `ctx.model.list()` carry `providerID`, `id`, and
   `limit.context`.
 - Rules live in `ctx.storage` under `context-limit`.
 
@@ -50,9 +50,9 @@ config edit is needed.
 
 - `parseBudget` - parses tokens, `128K`, `1M`, and `50%`, with clamping.
 - `matchPattern`, `longestMatch`, `resolveBudget` - rule matching.
-- `applyBudget` - the catalog transform body, exported for tests.
+- `applyBudget` - the model transform body, exported for tests.
 - `setup` - registers the command and the transform.
-- `context-limit.test.ts` - tests with a fake catalog and ctx.
+- `context-limit.test.ts` - tests with a fake model editor and ctx.
 
 ## Releasing
 

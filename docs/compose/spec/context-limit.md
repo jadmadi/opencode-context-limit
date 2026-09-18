@@ -10,11 +10,11 @@ commits: 5e865ff..4647039
 
 ## Report
 
-**T0 spike result** - The mechanism is a catalog transform:
+**T0 spike result** - The mechanism is a model transform:
 
 ```ts
-ctx.catalog.transform((catalog) =>
-  catalog.model.update(providerID, modelID, (model) => {
+ctx.model.transform((editor) =>
+  editor.update(providerID, modelID, (model) => {
     model.limit = { ...model.limit, context: n }
   }),
 )
@@ -27,9 +27,9 @@ usable input budget, so this is the mechanism, and no config edit is needed.
 **What was built** - A single-file OpenCode V2 plugin that sets a working
 context budget per model. `/context-limit` shows the budget, `/context-limit
 128K` or `50%` sets it for the current model, `/context-limit <pattern>
-<value>` sets a rule, and `0` clears. Rules live in storage. A catalog transform
+<value>` sets a rule, and `0` clears. Rules live in storage. A model transform
 lowers the matched models' `limit.context`, and a change calls
-`ctx.catalog.reload()`. Budgets clamp to the catalog window and never raise it.
+`ctx.model.reload()`. Budgets clamp to the catalog window and never raise it.
 
 **Verification** - `bun test`: 14 pass, 0 fail, 42 assertions. Live: `128K`
 lowered the effective window to 128000; `50%` reported window 500000 with
@@ -38,14 +38,14 @@ blocking items plus a medium and lows; all are resolved.
 
 **Journey log**
 
-1. The spike proved the mechanism: a catalog transform lowered
+1. The spike proved the mechanism: a model transform lowered
    `deepseek/deepseek-flash` from 1,000,000 to 123,456, so no config edit was
    needed.
 2. The show path re-resolved a percent rule against the already-lowered window,
    so a 50% rule printed Budget 250000. It now reports the stored rule, and a
    token rule above the window prints the clamped number.
-3. The show test used a fixed catalog, which hid that bug. The fake now rebuilds
-   the catalog from the registered transforms, the way the runtime replays them.
+3. The show test used a fixed model list, which hid that bug. The fake now rebuilds
+   the list from the registered transforms, the way the runtime replays them.
 
 ## [S1] Problem
 
@@ -68,7 +68,7 @@ compaction.
   such as `opencode-go/*` or `*`, and the longest matching pattern wins. The map
   lives in `opencode.json` under `compaction.max_context` when the config
   supports it, otherwise in plugin storage.
-- A spike task decides where the budget can take effect: a catalog transform on
+- A spike task decides where the budget can take effect: a model transform on
   the model limit, or the config compaction threshold. The chosen path is
   recorded in the spec before the command is built.
 
