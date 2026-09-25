@@ -6,7 +6,7 @@ Guidance for agents working in this repository.
 
 An OpenCode V2 plugin (`context-limit.ts`) that sets a per-model working context
 budget by lowering the model's `limit.context` through a model transform. No
-build step, no dependencies, MIT.
+build step, no dependencies, AGPL-3.0-only.
 
 ## Local development
 

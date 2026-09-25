@@ -60,4 +60,4 @@ Inspired by MiMoCode's `/context-limit`. See `NOTICE`.
 
 ## License
 
-MIT
+AGPL-3.0-only. Copyright (C) 2026 Jad Madi.
