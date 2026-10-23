@@ -5,10 +5,12 @@
 // follows the model's usable input budget, so a lower window makes compaction
 // fire earlier. A budget can only lower a window, never raise it.
 //
-// The runtime does not resolve @opencode/plugin, so this file exports a plain
-// { id, setup } object.
+// The host provides @opencode/plugin at runtime, so this file uses
+// Plugin.define.
 
-const VERSION = "2026.9.0"
+import { Plugin } from "@opencode/plugin"
+
+const VERSION = "2026.10.0"
 
 type Unit = "tokens" | "percent"
 
@@ -97,7 +99,7 @@ function describeRules(rules: Rule[]): string {
     .join("\n")
 }
 
-const plugin = {
+const plugin = Plugin.define({
   id: "context-limit",
   async setup(ctx: any) {
     let rules = await loadRules(ctx)
@@ -175,7 +177,7 @@ const plugin = {
       })
     })
   },
-}
+})
 
 export { applyBudget, budgetFor, longestMatch, matchPattern, parseBudget, resolveBudget, VERSION }
 export default plugin
