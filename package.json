@@ -1,8 +1,8 @@
 {
   "name": "opencode-context-limit",
-  "version": "2026.10.1",
+  "version": "2026.10.2",
   "builtUnder": "2.1.4",
-  "description": "OpenCode V2 plugin that sets a per-model working context budget",
+  "description": "OpenCode V2 plugin that sets a per-model working context and max output token budget",
   "type": "module",
   "license": "AGPL-3.0-only",
   "scripts": {

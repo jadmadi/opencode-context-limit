@@ -1,18 +1,20 @@
-// OpenCode V2 context-limit plugin.
+// OpenCode V2 context-limit / output-limit plugin.
 //
-// Sets a working context budget per model by lowering the model's
-// `limit.context` through a model transform. Compaction's default threshold
-// follows the model's usable input budget, so a lower window makes compaction
-// fire earlier. A budget can only lower a window, never raise it.
+// Sets a working context budget and a max output-token budget per model by
+// lowering the model's `limit.context` / `limit.output` through a model
+// transform. Compaction's default threshold follows the model's usable input
+// budget, so a lower context window makes compaction fire earlier. A budget
+// only ever lowers a value, never raises it.
 //
 // The host provides @opencode/plugin at runtime, so this file uses
 // Plugin.define.
 
 import { Plugin } from "@opencode/plugin"
 
-const VERSION = "2026.10.1"
+const VERSION = "2026.10.2"
 
 type Unit = "tokens" | "percent"
+type LimitKind = "context" | "output"
 
 interface Rule {
   pattern: string
@@ -52,44 +54,47 @@ function longestMatch(rules: Rule[], key: string): Rule | undefined {
   return best
 }
 
-function budgetFor(rule: Rule, catalogContext: number): number {
-  const raw = rule.unit === "percent" ? Math.floor((catalogContext * rule.value) / 100) : rule.value
-  return Math.max(1, Math.min(raw, catalogContext))
+function budgetFor(rule: Rule, catalogCeiling: number): number {
+  const raw = rule.unit === "percent" ? Math.floor((catalogCeiling * rule.value) / 100) : rule.value
+  return Math.max(1, Math.min(raw, catalogCeiling))
 }
 
-function resolveBudget(rules: Rule[], key: string, catalogContext: number): number | undefined {
+function resolveBudget(rules: Rule[], key: string, catalogCeiling: number): number | undefined {
   const rule = longestMatch(rules, key)
-  return rule ? budgetFor(rule, catalogContext) : undefined
+  return rule ? budgetFor(rule, catalogCeiling) : undefined
 }
 
 // The model transform body. `editor` is a model editor: it exposes
-// list() and update(providerID, modelID, change).
-function applyBudget(editor: any, rules: Rule[]): void {
+// list() and update(providerID, modelID, change). `kind` picks which `limit`
+// field is lowered, context or output.
+function applyBudget(editor: any, rules: Rule[], kind: LimitKind = "context"): void {
   if (rules.length === 0) return
   for (const model of editor.list()) {
+    const ceiling = model.limit?.[kind]
+    if (typeof ceiling !== "number") continue
     const key = `${model.providerID}/${model.id}`
-    const budget = resolveBudget(rules, key, model.limit.context)
+    const budget = resolveBudget(rules, key, ceiling)
     if (budget === undefined) continue
     editor.update(model.providerID, model.id, (entry: any) => {
-      entry.limit = { ...entry.limit, context: budget }
+      entry.limit = { ...entry.limit, [kind]: budget }
     })
   }
 }
 
-async function loadRules(ctx: any): Promise<Rule[]> {
-  const stored = await ctx.storage.get("context-limit")
+async function loadRules(ctx: any, storageKey: string): Promise<Rule[]> {
+  const stored = await ctx.storage.get(storageKey)
   return Array.isArray(stored) ? (stored as Rule[]) : []
 }
 
-async function saveRules(ctx: any, rules: Rule[]): Promise<void> {
-  await ctx.storage.set("context-limit", rules)
+async function saveRules(ctx: any, storageKey: string, rules: Rule[]): Promise<void> {
+  await ctx.storage.set(storageKey, rules)
 }
 
-async function modelContext(ctx: any, key: string): Promise<number | undefined> {
+async function modelLimit(ctx: any, key: string, kind: LimitKind): Promise<number | undefined> {
   const result = await ctx.model.list()
   const data: any[] = Array.isArray(result) ? result : (result?.data ?? [])
   const found = data.find((model) => `${model.providerID}/${model.id}` === key)
-  return found?.limit?.context
+  return found?.limit?.[kind]
 }
 
 function describeRules(rules: Rule[]): string {
@@ -99,82 +104,120 @@ function describeRules(rules: Rule[]): string {
     .join("\n")
 }
 
+interface CommandOptions {
+  kind: LimitKind
+  name: string
+  storageKey: string
+  fieldLabel: "window" | "output"
+  description: string
+}
+
+// Builds a `/context-limit` or `/output-limit` command. `state` is shared with
+// the model transform so rule edits apply on the next `ctx.model.reload()`.
+function makeCommand(ctx: any, state: { context: Rule[]; output: Rule[] }, opts: CommandOptions) {
+  const { kind, name, storageKey, fieldLabel, description } = opts
+  return {
+    name,
+    description,
+    execute: async ({ sessionID, prompt }: any) => {
+      const text = typeof prompt?.text === "string" ? prompt.text.trim() : ""
+
+      if (!text) {
+        const info: any = await ctx.session.get({ sessionID }).catch(() => undefined)
+        const model = info?.model ?? info?.data?.model
+        const key = model ? `${model.providerID}/${model.id}` : undefined
+        const current = key ? await modelLimit(ctx, key, kind) : undefined
+        const rule = key ? longestMatch(state[kind], key) : undefined
+        const budget = rule
+          ? rule.unit === "percent"
+            ? `${rule.value}%`
+            : String(Math.min(rule.value, current ?? rule.value))
+          : "none"
+        throw new Error(
+          [
+            key ? `Model: ${key}` : "Model: unknown",
+            `${fieldLabel === "window" ? "Effective window" : "Effective output"}: ${current ?? "unknown"}`,
+            `Budget: ${budget}`,
+            "",
+            describeRules(state[kind]),
+            `${name} ${VERSION}`,
+          ].join("\n"),
+        )
+      }
+
+      const parts = text.split(/\s+/)
+      let pattern: string
+      let valueText: string
+      if (parts.length === 1) {
+        const info: any = await ctx.session.get({ sessionID }).catch(() => undefined)
+        const model = info?.model ?? info?.data?.model
+        if (!model) throw new Error("could not resolve the current model")
+        pattern = `${model.providerID}/${model.id}`
+        valueText = parts[0]
+      } else {
+        const target = parts[0]
+        valueText = parts.slice(1).join(" ")
+        if (target === "current") {
+          const info: any = await ctx.session.get({ sessionID }).catch(() => undefined)
+          const model = info?.model ?? info?.data?.model
+          if (!model) throw new Error("could not resolve the current model")
+          pattern = `${model.providerID}/${model.id}`
+        } else {
+          pattern = target
+        }
+      }
+
+      const parsed = parseBudget(valueText)
+      const clears = valueText === "0" || (parsed?.unit === "tokens" && parsed.value === 0)
+      if (clears) {
+        state[kind] = state[kind].filter((rule) => rule.pattern !== pattern)
+        await saveRules(ctx, storageKey, state[kind])
+        await ctx.model.reload()
+        return
+      }
+      if (!parsed || (parsed.unit === "tokens" && parsed.value <= 0)) {
+        throw new Error(`bad value "${valueText}"; use 128000, 128K, 1M, or 50% (0 clears)`)
+      }
+      state[kind] = state[kind].filter((rule) => rule.pattern !== pattern)
+      state[kind].push({ pattern, value: parsed.value, unit: parsed.unit })
+      await saveRules(ctx, storageKey, state[kind])
+      await ctx.model.reload()
+    },
+  }
+}
+
 const plugin = Plugin.define({
   id: "context-limit",
   async setup(ctx: any) {
-    let rules = await loadRules(ctx)
+    const state = {
+      context: await loadRules(ctx, "context-limit"),
+      output: await loadRules(ctx, "output-limit"),
+    }
 
-    await ctx.model.transform((editor: any) => applyBudget(editor, rules))
+    await ctx.model.transform((editor: any) => {
+      applyBudget(editor, state.context, "context")
+      applyBudget(editor, state.output, "output")
+    })
 
     await ctx.command.transform((editor: any) => {
-      editor.add({
-        name: "context-limit",
-        description: "Show or set a working context budget per model",
-        execute: async ({ sessionID, prompt }: any) => {
-          const text = typeof prompt?.text === "string" ? prompt.text.trim() : ""
-
-          if (!text) {
-            const info: any = await ctx.session.get({ sessionID }).catch(() => undefined)
-            const model = info?.model ?? info?.data?.model
-            const key = model ? `${model.providerID}/${model.id}` : undefined
-            const context = key ? await modelContext(ctx, key) : undefined
-            const rule = key ? longestMatch(rules, key) : undefined
-            const budget = rule
-              ? rule.unit === "percent"
-                ? `${rule.value}%`
-                : String(Math.min(rule.value, context ?? rule.value))
-              : "none"
-            throw new Error(
-              [
-                key ? `Model: ${key}` : "Model: unknown",
-                `Effective window: ${context ?? "unknown"}`,
-                `Budget: ${budget}`,
-                "",
-                describeRules(rules),
-                `context-limit ${VERSION}`,
-              ].join("\n"),
-            )
-          }
-
-          const parts = text.split(/\s+/)
-          let pattern: string
-          let valueText: string
-          if (parts.length === 1) {
-            const info: any = await ctx.session.get({ sessionID }).catch(() => undefined)
-            const model = info?.model ?? info?.data?.model
-            if (!model) throw new Error("could not resolve the current model")
-            pattern = `${model.providerID}/${model.id}`
-            valueText = parts[0]
-          } else {
-            const target = parts[0]
-            valueText = parts.slice(1).join(" ")
-            if (target === "current") {
-              const info: any = await ctx.session.get({ sessionID }).catch(() => undefined)
-              const model = info?.model ?? info?.data?.model
-              if (!model) throw new Error("could not resolve the current model")
-              pattern = `${model.providerID}/${model.id}`
-            } else {
-              pattern = target
-            }
-          }
-
-          const parsed = parseBudget(valueText)
-          const clears = valueText === "0" || (parsed?.unit === "tokens" && parsed.value === 0)
-          if (clears) {
-            rules = rules.filter((rule) => rule.pattern !== pattern)
-            await saveRules(ctx, rules)
-            await ctx.model.reload()
-            return
-          }
-          if (!parsed || (parsed.unit === "tokens" && parsed.value <= 0)) {
-            throw new Error(`bad value "${valueText}"; use 128000, 128K, 1M, or 50% (0 clears)`)
-          }
-          rules = rules.filter((rule) => rule.pattern !== pattern)
-          rules.push({ pattern, value: parsed.value, unit: parsed.unit })
-          await saveRules(ctx, rules)
-          await ctx.model.reload()
-        },
-      })
+      editor.add(
+        makeCommand(ctx, state, {
+          kind: "context",
+          name: "context-limit",
+          storageKey: "context-limit",
+          fieldLabel: "window",
+          description: "Show or set a working context budget per model",
+        }),
+      )
+      editor.add(
+        makeCommand(ctx, state, {
+          kind: "output",
+          name: "output-limit",
+          storageKey: "output-limit",
+          fieldLabel: "output",
+          description: "Show or set a max output token budget per model",
+        }),
+      )
     })
   },
 })
