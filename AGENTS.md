@@ -5,8 +5,9 @@ Guidance for agents working in this repository.
 ## What this is
 
 An OpenCode V2 plugin (`context-limit.ts`) that sets a per-model working context
-budget by lowering the model's `limit.context` through a model transform. No
-build step, no dependencies, AGPL-3.0-only.
+budget and a max output-token budget by lowering the model's `limit.context` /
+`limit.output` through a model transform. No build step, no dependencies,
+AGPL-3.0-only.
 
 ## Local development
 
@@ -42,18 +43,21 @@ config edit is needed.
 
 ## API notes
 
-- `ctx.model.transform((editor) => editor.update(providerID, modelID, (model) => { model.limit = { ...model.limit, context: n } }))`
-  lowers a window. Call `ctx.model.reload()` after changing the rules.
+- `ctx.model.transform((editor) => editor.update(providerID, modelID, (model) => { model.limit = { ...model.limit, [field]: n } }))`
+  lowers a window or an output cap. Call `ctx.model.reload()` after changing the
+  rules.
 - Model entries from `ctx.model.list()` carry `providerID`, `id`, and
-  `limit.context`.
-- Rules live in `ctx.storage` under `context-limit`.
+  `limit.context` / `limit.output`.
+- Rules live in `ctx.storage` under `context-limit` and `output-limit`.
 
 ## Layout
 
 - `parseBudget` - parses tokens, `128K`, `1M`, and `50%`, with clamping.
 - `matchPattern`, `longestMatch`, `resolveBudget` - rule matching.
-- `applyBudget` - the model transform body, exported for tests.
-- `setup` - registers the command and the transform.
+- `applyBudget` - the model transform body (`kind` selects `context` vs
+  `output`), exported for tests.
+- `makeCommand` - builds `/context-limit` and `/output-limit` from one template.
+- `setup` - registers both commands and the transform.
 - `context-limit.test.ts` - tests with a fake model editor and ctx.
 
 ## Releasing

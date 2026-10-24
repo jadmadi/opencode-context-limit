@@ -1,7 +1,7 @@
 ---
 feature: context-limit
 status: delivered
-updated: 2026-09-12
+updated: 2026-10-24
 branch: feat/context-limit
 commits: 5e865ff..4647039
 ---
@@ -25,11 +25,17 @@ re-read showed 123,456. Compaction's default threshold follows the model's
 usable input budget, so this is the mechanism, and no config edit is needed.
 
 **What was built** - A single-file OpenCode V2 plugin that sets a working
-context budget per model. `/context-limit` shows the budget, `/context-limit
-128K` or `50%` sets it for the current model, `/context-limit <pattern>
-<value>` sets a rule, and `0` clears. Rules live in storage. A model transform
-lowers the matched models' `limit.context`, and a change calls
-`ctx.model.reload()`. Budgets clamp to the catalog window and never raise it.
+context budget and a max output-token budget per model. `/context-limit` and
+`/output-limit` show a budget, set it for the current model, set a pattern rule,
+and clear with `0`. Rules live in storage under `context-limit` and
+`output-limit`. A model transform lowers the matched models' `limit.context`
+and `limit.output`, and a change calls `ctx.model.reload()`. Budgets clamp to
+the catalog value for their field and never raise it.
+
+**Output budget (2026.10.2)** - Ported from the `/output-limit` patch by Elijah
+Shaw-Rutschman (@elijahwander). The rule engine now takes a `kind` that selects
+`context` or `output`, the two rule sets are stored separately, and one model
+transform applies both. `bun test`: 21 pass, 0 fail, 50 assertions.
 
 **Verification** - `bun test`: 14 pass, 0 fail, 42 assertions. Live: `128K`
 lowered the effective window to 128000; `50%` reported window 500000 with
@@ -63,7 +69,9 @@ compaction.
 - `/context-limit` prints the resolved budget for the current model.
   `/context-limit 128K` sets it. `/context-limit 50%` sets half the catalog
   window. `/context-limit 0` clears it.
-- Values clamp to the catalog window and never raise it.
+- `/output-limit` is the same shape for a max output-token budget. It lowers
+  `limit.output` and stores its rules separately.
+- Values clamp to the catalog value for their field and never raise it.
 - Storage is a map from a model pattern to a budget. Patterns accept a wildcard,
   such as `opencode-go/*` or `*`, and the longest matching pattern wins. The map
   lives in `opencode.json` under `compaction.max_context` when the config
